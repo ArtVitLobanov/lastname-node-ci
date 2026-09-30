@@ -1,0 +1,30 @@
+name: Test CI
+
+on:
+ push:
+  branches: [ main ]
+
+jobs:
+ test-node:
+  runs-on: ubuntu-latest
+
+  steps:
+  - name: Checkout code
+    uses: actions/checkout@v6.1.0
+
+  - name: Setup Node.js
+    uses: actions/setup-node@6.5.0
+    with:
+     node-version: "26.10.0"
+
+  - name: Install requirements
+    run: npm install
+
+  - name: Build
+    run: npm run build
+
+  - name: Upload build artifact
+    uses: actions/upload-artifact@v7.0.1
+    with:
+     name: build-files
+     path: dist/
