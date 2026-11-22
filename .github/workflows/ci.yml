@@ -28,3 +28,26 @@ jobs:
     with:
      name: build-files
      path: dist/
+
+  - name: Decode SSH key
+    run: |
+      echo "${{ secrets.GCP_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_key
+      chmod 600 ~/.ssh/deploy_key
+
+  - name: Copy files to GCP
+    run: |
+      rsync -avz --exclude '.git' --exclude 'node_modules' \
+        -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+        ./ "${{ secrets.GCP_USER }}@${{ secrets.GCP_HOST }}:/home/${{ secrets.GCP_USER }}/nodeapp/"
+
+  - name: Run app
+    run: |
+      ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.GCP_USER }}@${{ secrets.GCP_HOST }} << 'EOF'
+      curl -fsSL https://deb.nodesource.com/setup_26.x | sudo -E bash -
+      sudo apt-get install -y nodejs
+      sudo npm install -g pm2
+      cd ~/nodeapp
+      npm install
+      pm2 restart all || pm2 start dist/index.js --name nodeapp
+      EOF
+      
