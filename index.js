@@ -1,3 +1,27 @@
-console.log("Hello world!");
-console.log("This is a new test message 1!");
-console.log("This is a new test message 2!");
+const http = require('http');
+const { Client } = require('pg');
+
+const PORT = process.env.PORT || 3000;
+
+const client = new Client({
+    host: 'db',
+    user: 'postgres',
+    password: 'postgres',
+    database: 'mydb',
+});
+
+client.on('error', (err) => {
+    console.error('Unexpected Postgres client error:', err);
+});
+
+client.connect()
+    .then(() => console.log('Connected to Postgres!'))
+    .catch(err => console.error('Connection error! ', err));
+
+const server = http.createServer((req, res) => {
+    res.end('this is node on docker, hello :D');
+});
+
+server.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`)
+})

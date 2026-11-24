@@ -1,54 +1,75 @@
 name: Test CI
 
 on:
- push:
-  branches: [ main ]
+  push:
+    branches: [ main ]
 
 jobs:
- test-node:
-  runs-on: ubuntu-latest
+  test-node:
+    runs-on: ubuntu-latest
 
-  steps:
-  - name: Checkout code
-    uses: actions/checkout@v6
+    steps:  
+      - name: Checkout code  
+        uses: actions/checkout@v6  
+    
+      - name: Setup Node.js  
+        uses: actions/setup-node@v6  
+        with:  
+          node-version: "26.10.0"  
+    
+      - name: Install requirements  
+        run: npm install  
+    
+      - name: Build  
+        run: npm run build  
+    
+      - name: Upload build artifact  
+        uses: actions/upload-artifact@v7  
+        with:  
+          name: build-files  
+          path: dist/  
+        
+      - name: Generate Docker image tags  
+        id: tag  
+        run: |  
+          echo "IMAGE_TAG=$(git rev-parse --short HEAD)" >> $GITHUB_ENV  
+          echo "BRANCH_TAG=$(echo ${GITHUB_REF##*/})" >> $GITHUB_ENV  
+        
+      - name: Log in the Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }} 
+    
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_HUB_USERNAME }}/nodeapp:${{ env.IMAGE_TAG }}
+            ${{ secrets.DOCKER_HUB_USERNAME }}/nodeapp:${{ env.BRANCH_TAG }}-${{ env.IMAGE_TAG }}
 
-  - name: Setup Node.js
-    uses: actions/setup-node@v6
-    with:
-     node-version: "26.10.0"
-
-  - name: Install requirements
-    run: npm install
-
-  - name: Build
-    run: npm run build
-
-  - name: Upload build artifact
-    uses: actions/upload-artifact@v7
-    with:
-     name: build-files
-     path: dist/
-
-  - name: Decode SSH key
-    run: |
-      mkdir -p ~/.ssh
-      echo "${{ secrets.GCP_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_key
-      chmod 600 ~/.ssh/deploy_key
-
-  - name: Copy files to GCP
-    run: |
-      rsync -avz --exclude '.git' --exclude 'node_modules' \
-        -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
-        ./ "${{ secrets.GCP_USER }}@${{ secrets.GCP_HOST }}:/home/${{ secrets.GCP_USER }}/nodeapp/"
-
-  - name: Run app
-    run: |
-      ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.GCP_USER }}@${{ secrets.GCP_HOST }} << 'EOF'
-      curl -fsSL https://deb.nodesource.com/setup_26.x | sudo -E bash -
-      sudo apt-get install -y nodejs
-      sudo npm install -g pm2
-      cd ~/nodeapp
-      npm install
-      pm2 restart all || pm2 start dist/index.js --name nodeapp
-      EOF
+      - name: Decode SSH key  
+        run: |  
+          mkdir -p ~/.ssh  
+          echo "${{ secrets.GCP_SSH_KEY_B64 }}" | base64 -d > ~/.ssh/deploy_key  
+          chmod 600 ~/.ssh/deploy_key  
       
+      - name: Pulling and starting Docker from Docker Hub
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no docker-compose.yml ${{ secrets.GCP_USER }}@${{ secrets.GCP_HOST }}:~/docker-compose.yml
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.GCP_USER }}@${{ secrets.GCP_HOST }} << EOF
+
+          # Make app folder and copy docker-compose file into it
+          set -e
+          mkdir -p ~/nodeapp
+          mv ~/docker-compose.yml ~/nodeapp/docker-compose.yml
+          
+          # Launch apps with Docker Compose
+          cd ~/nodeapp
+          sudo docker rm -f nodeapp || true
+          sudo DOCKER_HUB_USERNAME="${{ secrets.DOCKER_HUB_USERNAME }}" IMAGE_TAG="${{ env.IMAGE_TAG }}" docker compose pull
+          sudo DOCKER_HUB_USERNAME="${{ secrets.DOCKER_HUB_USERNAME }}" IMAGE_TAG="${{ env.IMAGE_TAG }}" docker compose up -d
+
+          EOF
